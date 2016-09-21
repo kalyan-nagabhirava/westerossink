@@ -1,2 +1,6 @@
+#westeros video sink
 
-westeros video sink
+steps to build:
+
+autogen.sh
+Make
