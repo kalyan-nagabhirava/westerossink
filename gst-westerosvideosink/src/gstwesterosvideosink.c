@@ -22,11 +22,6 @@ enum
   LAST_SIGNAL
 };
 
-enum
-{
-  PROP_0,
-  PROP_SILENT
-};
 
 /* the capabilities of the inputs and outputs.
  *
@@ -113,11 +108,11 @@ static void
 gst_westeros_video_sink_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
-  GstwesterosVideoSink *filter = GST_WESTEROSVIDEOSINK (object);
+  GstwesterosVideoSink *sink = GST_WESTEROSVIDEOSINK (object);
 
   switch (prop_id) {
-    case PROP_SILENT:
-      filter->silent = g_value_get_boolean (value);
+    case PROP_WESTEROS_DISPLAY:
+      filter->window->wos_display = g_value_get_pointer (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -129,11 +124,11 @@ static void
 gst_westeros_video_sink_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec)
 {
-  GstwesterosVideoSink *filter = GST_WESTEROSVIDEOSINK (object);
+  GstwesterosVideoSink *sink = GST_WESTEROSVIDEOSINK (object);
 
   switch (prop_id) {
-    case PROP_SILENT:
-      g_value_set_boolean (value, filter->silent);
+    case PROP_WESTEROS_DISPLAY::
+      g_value_set_pointer (value, sink->window->wos_display);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);

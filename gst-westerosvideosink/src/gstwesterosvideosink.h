@@ -49,7 +49,7 @@ typedef struct _GstwesterosVideoSinkClass GstwesterosVideoSinkClass;
 enum
 {
   PROP_0,
-  PROP_WAYLAND_DISPLAY
+  PROP_WESTEROS_DISPLAY
 };
 
 
