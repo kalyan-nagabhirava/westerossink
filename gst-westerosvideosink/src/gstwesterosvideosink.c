@@ -1,7 +1,8 @@
 /*
  * L&T TS 
  * Copyright (C) 2016 kalyan-nagabhirava <<kalyankumar.nagabhirava@lnttechservices.com>>
- * add other users
+ * padmapriya << PadmaPriya.Kumarasamy@LNTTECHSERVICES.COM>;
+ * pavan nandyala pavan.nandyala@lnttechservices.com>> ;
  */
 
 #ifdef HAVE_CONFIG_H
@@ -11,7 +12,7 @@
 #include <gst/gst.h>
 
 #include "gstwesterosvideosink.h"
-
+#include "westerosbufferpool.h"
 GST_DEBUG_CATEGORY_STATIC (gst_westeros_video_sink_debug);
 #define GST_CAT_DEFAULT gst_westeros_video_sink_debug
 
@@ -33,14 +34,8 @@ static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE ("sink",
     GST_STATIC_CAPS ("ANY")
     );
 
-static GstStaticPadTemplate src_factory = GST_STATIC_PAD_TEMPLATE ("src",
-    GST_PAD_SRC,
-    GST_PAD_ALWAYS,
-    GST_STATIC_CAPS ("ANY")
-    );
-
 #define gst_westeros_video_sink_parent_class parent_class
-G_DEFINE_TYPE (GstwesterosVideoSink, gst_westeros_video_sink, GST_TYPE_ELEMENT);
+G_DEFINE_TYPE (GstwesterosVideoSink, gst_westeros_video_sink, GST_VIDEO_SINK);
 
 static void gst_westeros_video_sink_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
@@ -221,7 +216,7 @@ westerosvideosink_init (GstPlugin * westerosvideosink)
 GST_PLUGIN_DEFINE (
     GST_VERSION_MAJOR,
     GST_VERSION_MINOR,
-    westerosvideosink,
+    westerossink,
     "Template westerosvideosink",
     westerosvideosink_init,
     VERSION,
