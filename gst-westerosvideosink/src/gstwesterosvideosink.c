@@ -11,7 +11,7 @@
 #include <gst/gst.h>
 
 #include "gstwesterosvideosink.h"
-#include "westeros-pool.h"
+#include "westerosbufferpool.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_westeros_video_sink_debug);
 #define GST_CAT_DEFAULT gst_westeros_video_sink_debug

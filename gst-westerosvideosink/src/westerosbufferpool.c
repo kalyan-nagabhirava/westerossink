@@ -9,7 +9,7 @@
 #include <gst/video/gstvideopool.h>
 
 #include "gstwesterosvideosink.h"
-#include "westeros-pool.h"
+#include "westerosbufferpool.h"
 
 #define SIZE 1024
 #define SHM_FILE_PATH "/tmp/westeros-shm"
