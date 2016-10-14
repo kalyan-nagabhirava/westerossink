@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <assert.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
@@ -34,23 +35,19 @@ G_BEGIN_DECLS
 /* #defines don't like whitespacey bits */
 #define GST_TYPE_WESTEROSVIDEOSINK \
   (gst_westeros_video_sink_get_type())
+
 #define GST_WESTEROSVIDEOSINK(obj) \
   (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_WESTEROSVIDEOSINK,GstwesterosVideoSink))
+
 #define GST_WESTEROSVIDEOSINK_CLASS(klass) \
   (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_WESTEROSVIDEOSINK,GstwesterosVideoSinkClass))
+
 #define GST_IS_WESTEROSVIDEOSINK(obj) \
   (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_WESTEROSVIDEOSINK))
+
 #define GST_IS_WESTEROSVIDEOSINK_CLASS(klass) \
   (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_WESTEROSVIDEOSINK))
 
-typedef struct _GstwesterosVideoSink      GstwesterosVideoSink;
-typedef struct _GstwesterosVideoSinkClass GstwesterosVideoSinkClass;
-
-enum
-{
-  PROP_0,
-  PROP_WAYLAND_DISPLAY
-};
 
 
 struct westeros_window_display
@@ -67,8 +64,8 @@ struct westeros_window_display
   struct wl_shell_surface *wos_shell_surface;
   struct wl_buffer *wos_buffer;
   struct wl_callback *wos_callback;
-  //guint redraw_pending :1;
   guint redraw_check :1;
+  uint32_t wos_surfaceId;
 
 };
 
@@ -80,31 +77,31 @@ struct wos_shared_pool {
   void *buff;
 };
 
-typedef westeros_window_display wDisplay;
-
-
+typedef struct westeros_window_display wDisplay;
 
 struct _GstwesterosVideoSink
 {
   GstVideoSink parent;
-
   wDisplay *window;
   struct wos_shared_pool *shared_pool;
-
   GstBufferPool *pool;
-
   GMutex wos_lock;
-
   gint VWidth;
   gint VHeight;
+   int windowX;
+   int windowY;
+   int windowWidth;
+   int windowHeight;
   uint32_t format;
-
 };
 
 struct _GstwesterosVideoSinkClass 
 {
-  GstElementClass parent_class;
+  GstVideoSinkClass parent_class;
 };
+
+typedef struct _GstwesterosVideoSink      GstwesterosVideoSink;
+typedef struct _GstwesterosVideoSinkClass GstwesterosVideoSinkClass;
 
 GType gst_westeros_video_sink_get_type (void);
 

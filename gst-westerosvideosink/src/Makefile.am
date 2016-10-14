@@ -1,13 +1,10 @@
-plugin_LTLIBRARIES = libgstwesterosvideosink.la 
 
-
-
-libgstwesterosvideosink_la_SOURCES = gstwesterosvideosink.c gstwesterosvideosink.h
-
-libgstwesterosvideosink_la_CFLAGS = $(GST_CFLAGS)
-libgstwesterosvideosink_la_LIBADD = $(GST_LIBS)
-libgstwesterosvideosink_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
-libgstwesterosvideosink_la_LIBTOOLFLAGS = --tag=disable-static
-
-
-noinst_HEADERS = gstwesterosvideosink.h
+SUBDIRS = 
+AM_CPPFLAGS = -pthread -Wall -I./
+plugin_LTLIBRARIES = libgstwesterossinkbin.la
+libgstwesterossinkbin_la_SOURCES =  gstwesterosvideosink.c  westeros-pool.c
+libgstwesterossinkbin_la_CFLAGS =  $(GST_CFLAGS)
+libgstwesterossinkbin_la_LDFLAGS = $(GST_LIBS) 
+libgstwesterossinkbin_la_LIBADD = -lwayland-client -lgstvideo-1.0 -lgstreamer-1.0 -lgstbase-1.0 -lwesteros_simplebuffer_client -lwesteros_simpleshell_client -lgstvideo-1.0 -ldl
+libgstwesterossinkbin_la_LDFLAGS += -module -avoid-version
+libgstwesterossinkbin_la_LIBTOOLFLAGS = --tag=disable-static
