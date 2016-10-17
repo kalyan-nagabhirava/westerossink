@@ -8,7 +8,6 @@ Wayland video client for westeros compositer
 If not stated otherwise in this file or this component's Licenses.txt file the
 following copyright and licenses apply:
 
-Copyright L&T Technology services
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
