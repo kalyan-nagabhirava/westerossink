@@ -1,6 +1,12 @@
 #westeros video sink
 
-steps to build:
+Plugin Name : westerossink
 
-autogen.sh
-Make
+# To get the plugin details do
+       gst-inspect-1.0 westerossink 
+
+# To  test plugin,
+       gst-launch-1.0 videotestsrc ! westerossink
+       gst-launch-1.0 playbin uri=file://<sample file location> video-sink=westerossink
+
+
