@@ -18,6 +18,7 @@ GST_DEBUG_CATEGORY_STATIC (gst_westeros_video_sink_debug);
 
 #define DEFAULT_WINDOW_X (0)
 #define DEFAULT_WINDOW_Y (0)
+
 #define DEFAULT_WINDOW_WIDTH (1280)
 #define DEFAULT_WINDOW_HEIGHT (720)
 
@@ -30,7 +31,6 @@ GST_DEBUG_CATEGORY_STATIC (gst_westeros_video_sink_debug);
 #else
 #define SINK_CAPS "{BGRx, BGRA}"
 #endif
-
 
 
 /* Filter signals and args */
@@ -46,6 +46,10 @@ enum
   PROP_SILENT,
   PROP_WESTEROS_DISPLAY,
   PROP_WINDOW_SET
+#if 0
+  PROP_ZORDER,
+  PROP_OPACITY
+#endif
 };
 
 
@@ -109,6 +113,8 @@ static gboolean gst_westeros_video_sink_propose_allocation (GstBaseSink * bsink,
 static GstCaps *gst_westeros_video_sink_get_caps (GstBaseSink * bsink, GstCaps * filter);
 
 static gboolean gst_westeros_video_sink_set_caps (GstBaseSink * bsink, GstCaps * caps);
+
+static wDisplay* create_wos_display(GstwesterosVideoSink *sink);
 //-----------------------------------------------------------------------------------------------------------------------------
 
 
@@ -129,6 +135,7 @@ gst_westeros_video_sink_class_init (GstwesterosVideoSinkClass * klass)
 
 
   gstbasesink_class->start= GST_DEBUG_FUNCPTR (gst_westeros_video_sink_start);
+  gstbasesink_class->stop= GST_DEBUG_FUNCPTR (gst_westeros_video_sink_stop);
   gstbasesink_class->render= GST_DEBUG_FUNCPTR (gst_westeros_video_sink_render);
   gstbasesink_class->preroll= GST_DEBUG_FUNCPTR (gst_westeros_video_sink_preroll);   
   gstbasesink_class->propose_allocation = GST_DEBUG_FUNCPTR (gst_westeros_video_sink_propose_allocation);
@@ -138,6 +145,22 @@ gst_westeros_video_sink_class_init (GstwesterosVideoSinkClass * klass)
        g_param_spec_string ("window_set", "window set",
            "Window Set Format: x,y,width,height",
            NULL, G_PARAM_WRITABLE));
+  g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_WINDOW_SET,
+       g_param_spec_string ("rectangle", "rectangle",
+           "Window Set Format: x,y,width,height",
+           NULL, G_PARAM_WRITABLE));
+#if 0 
+  g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_ZORDER,
+       g_param_spec_float ("zorder", "zorder",
+           "zorder from 0.0 (lowest) to 1.0 (highest)",
+           0.0, 1.0, 0.0, G_PARAM_WRITABLE));
+
+   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_OPACITY,
+       g_param_spec_float ("opacity", "opacity",
+           "opacity from 0.0 (transparent) to 1.0 (opaque)",
+           0.0, 1.0, 1.0, G_PARAM_WRITABLE));
+#endif
+
   g_object_class_install_property (gobject_class, PROP_WESTEROS_DISPLAY,
       g_param_spec_pointer ("westeros-display", "Wayland Display",
           "Wayland  Display handle created by the application ",
@@ -166,33 +189,42 @@ gst_westeros_video_sink_class_init (GstwesterosVideoSinkClass * klass)
 
 }
 
-static void gst_westeros_video_sink_init (GstwesterosVideoSink * sink)
+static void 
+gst_westeros_video_sink_init (GstwesterosVideoSink * sink)
 {
-  sink->window =  NULL;
-  sink->shared_pool = NULL;
-  sink->pool  = NULL;
+  sink->wos_display =  NULL;
+  sink->wos_sharedPool = NULL;
+  sink->wos_gstPool = NULL;
    #ifdef GLIB_VERSION_2_32 
    g_mutex_init( &sink->wos_lock );
    #else
    sink->wos_lock= g_mutex_new();
    #endif
 
-   sink->VWidth= DEFAULT_WIDTH;
-   sink->VHeight= DEFAULT_HEIGHT;
-
+   sink->defaultWidth= DEFAULT_WIDTH;
+   sink->defaultHeight= DEFAULT_HEIGHT;
 
    sink->windowX= DEFAULT_WINDOW_X;
    sink->windowY= DEFAULT_WINDOW_Y;
    sink->windowWidth= DEFAULT_WINDOW_WIDTH;
    sink->windowHeight= DEFAULT_WINDOW_HEIGHT;
 
-   //sink->window->wos_surfaceId = 0;
+   sink->zorder= 0.0;
+   sink->opacity= 1.0;
+   sink->visible= false;
+
+   sink->geometrySet= false;
 
 }
 
-static void gst_westeros_video_sink_set_property (GObject * object, guint prop_id, const GValue * value, GParamSpec * pspec)
+static void 
+gst_westeros_video_sink_set_property (GObject * object, 
+                                      guint prop_id, 
+                                      const GValue * value, 
+                                      GParamSpec * pspec)
 {
   GstwesterosVideoSink *sink = GST_WESTEROSVIDEOSINK (object);
+  wDisplay *display = sink->wos_display;
 
   switch (prop_id) {
     case PROP_SILENT:
@@ -215,43 +247,65 @@ static void gst_westeros_video_sink_set_property (GObject * object, guint prop_i
             GST_ERROR( "Bad window properties string" );
          }
          else
-         {         
-            sink->windowX= atoi( parts[0] );
-            sink->windowY= atoi( parts[1] );
-            sink->windowWidth= atoi( parts[2] );
-            sink->windowHeight= atoi( parts[3] );
-           #if 0 
-            //if ( sink->window->wos_shell && sink->window->wos_surfaceId ) //ori
-            if ( sink->window->wos_shell )
-            {
-               wl_simple_shell_set_geometry( sink->window->wos_shell, sink->window->wos_surfaceId, 
-                                             sink->windowX, sink->windowY, 
-                                             sink->windowWidth, sink->windowHeight );
-                                             
-               printf("gst_westeros_sink_set_property set window rect (%d,%d,%d,%d)\n", 
-                       sink->windowX, sink->windowY, sink->windowWidth, sink->windowHeight );
-                       
-               if ( (sink->windowWidth > 0) && (sink->windowHeight > 0 ) )
-               {
-                  wl_simple_shell_set_visible( sink->window->wos_shell, sink->window->wos_surfaceId, true);
-                  
-                  wl_simple_shell_get_status( sink->window->wos_shell, sink->window->wos_surfaceId);
-                  
-                  wl_display_flush( sink->window->wos_display );
-               }
-            }            
-                    
-            sink->VWidth= sink->windowWidth;
-            sink->VHeight= sink->windowHeight;
-           #endif
-         }
+	 {         
+		 sink->windowX= atoi( parts[0] );
+		 sink->windowY= atoi( parts[1] );
+		 sink->windowWidth= atoi( parts[2] );
+		 sink->windowHeight= atoi( parts[3] );
+  		if (!display)
+		    display = create_wos_display (sink);
+
+  		if (display == NULL) 
+		{
+	 	   	GST_ELEMENT_ERROR (sink, RESOURCE, OPEN_READ_WRITE,
+        		("Could not initialise Westeros output"),
+	        	("Could not create Westeros display"));
+			    return ;
+		}
+		 wl_simple_shell_set_geometry( display->wos_shell, display->wos_surfaceId, 
+				 sink->windowX, sink->windowY, 
+				 sink->windowWidth, sink->windowHeight );
+
+		 sink->geometrySet= true;
+		 printf("\n@@###############gst_westeros_sink_set_property set window rect (%d,%d,%d,%d)##############@@\n", 
+				 sink->windowX, sink->windowY, sink->windowWidth, sink->windowHeight );
+
+
+		 wl_simple_shell_get_status( display->wos_shell, display->wos_surfaceId);
+		 wl_simple_shell_set_visible( display->wos_shell, display->wos_surfaceId, true);
+		 wl_display_flush( display->wos_display );
+
+	 }
 
          g_strfreev(parts);
          break;
       }
+#if 0  
+      case PROP_ZORDER:
+      {
+         sink->zorder= g_value_get_float(value);
+         if ( sink->window->wos_shell )
+         {
+            wl_fixed_t zorder= wl_fixed_from_double(sink->zorder);
+            printf("\n###############gst_westeros_sink_set_property set zorder %f##############\n", sink->zorder );
+            wl_simple_shell_set_zorder( sink->window->wos_shell, sink->window->wos_surfaceId, zorder);
+         }
+         break;
+      }
 
+      case PROP_OPACITY:
+      {
+         sink->opacity= g_value_get_float(value);
+         if ( sink->window->wos_shell )
+         {
+            wl_fixed_t opacity= wl_fixed_from_double(sink->opacity);
+            printf("\n###############gst_westeros_sink_set_property set opacity %f##############\n", sink->opacity );
+            wl_simple_shell_set_opacity ( sink->window->wos_shell, sink->window->wos_surfaceId, opacity );
+         }
+         break;
+      }
 
-
+#endif
 
     default:
     {
@@ -261,7 +315,11 @@ static void gst_westeros_video_sink_set_property (GObject * object, guint prop_i
   }
 }
 
-static void gst_westeros_video_sink_get_property (GObject * object, guint prop_id, GValue * value, GParamSpec * pspec)
+static void 
+gst_westeros_video_sink_get_property (GObject * object, 
+                                      guint prop_id, 
+                                      GValue * value, 
+                                      GParamSpec * pspec)
 {
   GstwesterosVideoSink *filter = GST_WESTEROSVIDEOSINK (object);
 
@@ -289,11 +347,12 @@ static void gst_westeros_video_sink_get_property (GObject * object, guint prop_i
   }
 }
 
-static void destroy_wos_display (wDisplay *display)
+static void 
+destroy_wos_display (wDisplay *display)
 {
   if(!display)
 	return;
-//destroy window params
+
   if (display->wos_callback)
     wl_callback_destroy (display->wos_callback);
 
@@ -306,7 +365,6 @@ static void destroy_wos_display (wDisplay *display)
   if (display->wos_surface)
     wl_surface_destroy (display->wos_surface);
 
-//destroy display params
   if (display->wos_shm)
     wl_shm_destroy (display->wos_shm);
 
@@ -322,25 +380,27 @@ static void destroy_wos_display (wDisplay *display)
 
   free (display);
 }
-static void destroy_shared_pool (struct wos_shared_pool *pool)
+static void 
+destroy_shared_pool (wSharedPool *sharedPool)
 {
-  munmap (pool->buff, pool->size);
-  wl_shm_pool_destroy (pool->pool);
-  free (pool);
+  munmap (sharedPool->buff, sharedPool->size);
+  wl_shm_pool_destroy (sharedPool->pool);
+  free (sharedPool);
 }
 
 
-static void gst_westeros_video_sink_finalize(GObject *object)
+static void 
+gst_westeros_video_sink_finalize(GObject *object)
 {
    GstwesterosVideoSink *sink = GST_WESTEROSVIDEOSINK(object);
 
    GST_DEBUG_OBJECT (sink, "Finalizing the sink..");
 
    if (sink)
-     destroy_wos_display (sink->window);
+     destroy_wos_display (sink->wos_display);
 
-   if (sink->shared_pool)
-     destroy_shared_pool (sink->shared_pool);
+   if (sink->wos_sharedPool)
+     destroy_shared_pool (sink->wos_sharedPool);
 
   g_mutex_clear (&sink->wos_lock);
 
@@ -349,7 +409,9 @@ static void gst_westeros_video_sink_finalize(GObject *object)
 }
 
 
-static GstStateChangeReturn gst_westeros_video_sink_change_state(GstElement *element, GstStateChange transition)
+static GstStateChangeReturn 
+gst_westeros_video_sink_change_state(GstElement *element, 
+			             GstStateChange transition)
 {
    GstStateChangeReturn result= GST_STATE_CHANGE_SUCCESS;
    GstwesterosVideoSink *sink= GST_WESTEROSVIDEOSINK(element);
@@ -409,7 +471,9 @@ static GstStateChangeReturn gst_westeros_video_sink_change_state(GstElement *ele
    }
 }
 
-static GstCaps *gst_westeros_video_sink_get_caps (GstBaseSink * bsink, GstCaps * filter)
+static GstCaps *
+gst_westeros_video_sink_get_caps (GstBaseSink * bsink, 
+				  GstCaps * filter)
 {
   GstwesterosVideoSink *sink;
   GstCaps *sink_caps;
@@ -440,7 +504,9 @@ static uint32_t gst_westeros_video_format_to_wos_format (GstVideoFormat gstForma
 
 
 
-static gboolean gst_westeros_video_sink_format_from_caps (uint32_t * wos_format, GstCaps * caps)
+static gboolean 
+gst_westeros_video_sink_format_from_caps (uint32_t * wos_format, 
+					 GstCaps * caps)
 {
   GstStructure *structure;
   GstVideoFormat gstFormat = GST_VIDEO_FORMAT_UNKNOWN;
@@ -457,7 +523,8 @@ static gboolean gst_westeros_video_sink_format_from_caps (uint32_t * wos_format,
 
 
 #ifndef GST_DISABLE_GST_DEBUG
-static const gchar *gst_westeros_video_format_to_string (uint32_t wos_format)
+static const gchar *
+gst_westeros_video_format_to_string (uint32_t wos_format)
 {
   guint i;
   GstVideoFormat format = GST_VIDEO_FORMAT_UNKNOWN;
@@ -470,10 +537,12 @@ static const gchar *gst_westeros_video_format_to_string (uint32_t wos_format)
 }
 #endif
 
-
-static gboolean gst_westeros_video_sink_set_caps (GstBaseSink * bsink, GstCaps * caps)
+static gboolean 
+gst_westeros_video_sink_set_caps (GstBaseSink * bsink, 
+				  GstCaps * caps)
 {
   GstwesterosVideoSink *sink = GST_WESTEROSVIDEOSINK (bsink);
+  wDisplay *display = sink->wos_display;
   static GstAllocationParams params = { 0, 0, 0, 15, };
   GstVideoInfo gst_videoInfo;
   GstStructure *gst_structure;
@@ -487,15 +556,16 @@ static gboolean gst_westeros_video_sink_set_caps (GstBaseSink * bsink, GstCaps *
   if (!gst_video_info_from_caps (&gst_videoInfo, caps))
     goto invalid_video_format;
 
-  sink->VWidth = gst_videoInfo.width;
-  sink->VHeight = gst_videoInfo.height;
+  sink->defaultWidth = gst_videoInfo.width;
+  sink->defaultHeight = gst_videoInfo.height;
+
   size = gst_videoInfo.size;
 
 
   if (!gst_westeros_video_sink_format_from_caps (&sink->format, caps))
     goto invalid_video_format;
 
-  if (!(sink->window->wos_formats & (1 << sink->format))) 
+  if (!(display->wos_formats & (1 << sink->format))) 
   {
     GST_DEBUG_OBJECT (sink, "%s not available", gst_westeros_video_format_to_string (sink->format));
     return FALSE;
@@ -517,8 +587,8 @@ static gboolean gst_westeros_video_sink_set_caps (GstBaseSink * bsink, GstCaps *
   if (!gst_buffer_pool_set_config (newbufferpool, gst_structure))
     goto config_failed;
 
-  oldbufferpool = sink->pool;
-  sink->pool = newbufferpool;
+  oldbufferpool = sink->wos_gstPool;
+  sink->wos_gstPool = newbufferpool;
   if (oldbufferpool)
     gst_object_unref (oldbufferpool);
 
@@ -538,7 +608,9 @@ invalid_video_format:
 }
 
 
-static gboolean gst_westeros_video_sink_propose_allocation (GstBaseSink * bsink, GstQuery * query)
+static gboolean 
+gst_westeros_video_sink_propose_allocation (GstBaseSink * bsink, 
+					    GstQuery * query)
 {
   GstwesterosVideoSink *sink = GST_WESTEROSVIDEOSINK (bsink);
   GstBufferPool *gst_bufferpool;
@@ -554,7 +626,7 @@ static gboolean gst_westeros_video_sink_propose_allocation (GstBaseSink * bsink,
 
   g_mutex_lock (&sink->wos_lock);
 
-  if ((gst_bufferpool = sink->pool))
+  if ((gst_bufferpool = sink->wos_gstPool))
     gst_object_ref (gst_bufferpool);
 
   g_mutex_unlock (&sink->wos_lock);
@@ -624,169 +696,280 @@ invalid_caps:
 }
 
 
-static void wos_shm_format (void *data, struct wl_shm *wos_shm, uint32_t gst_format)
+static void 
+wos_shm_format (void *data, 
+                struct wl_shm *wos_shm, 
+                uint32_t gst_format)
 {
-  wDisplay *d = data;
-  d->wos_formats |= (1 << gst_format);
+	GstwesterosVideoSink *sink =(GstwesterosVideoSink*) data;
+	wDisplay *display=sink->wos_display;
+
+	display->wos_formats |= (1 << gst_format);
 }
 
 struct wl_shm_listener wos_shm_listenter = { wos_shm_format };
 
 
 
-static void registry_handle_global (void *data, struct wl_registry *registry,
-    uint32_t id, const char *interface, uint32_t version)
+static void 
+wos_shellSurfaceId(void *data,
+                   struct wl_simple_shell *wl_simple_shell,
+                   struct wl_surface *surface,
+                   uint32_t surfaceId)
 {
-  wDisplay *d = data;
+	GstwesterosVideoSink *sink =(GstwesterosVideoSink*) data;
+	wDisplay *display=sink->wos_display;
 
-  if (strcmp (interface, "wl_compositor") == 0) {
-    d->wos_compositor = wl_registry_bind (registry, id, &wl_compositor_interface, 1);
+	char name[32];
+	wl_fixed_t zorder, opacity;
 
-  } else if (strcmp (interface, "wl_shell") == 0) {
-    d->wos_shell = wl_registry_bind (registry, id, &wl_shell_interface, 1);
+	display->wos_surfaceId= surfaceId;
+	sprintf( name, "westeros-sink-surface-%x", surfaceId );
+	wl_simple_shell_set_name( display->wos_shell, surfaceId, name );
 
-  } else if (strcmp (interface, "wl_shm") == 0) {
-    d->wos_shm = wl_registry_bind (registry, id, &wl_shm_interface, 1);
-    wl_shm_add_listener (d->wos_shm, &wos_shm_listenter, d);
-  }
+	if ( (sink->windowWidth == 0) || (sink->windowHeight == 0) )
+	{
+		wl_simple_shell_set_visible( display->wos_shell, display->wos_surfaceId, false);
+	}
+	else
+	{
+		if(sink->geometrySet)
+		{
+			printf("Geometry : x=%d, y=%d, width=%d, height=%d###############\n",sink->windowX,sink->windowY,
+					sink->windowWidth,sink->windowHeight);
+			wl_simple_shell_set_geometry( display->wos_shell, display->wos_surfaceId,
+					sink->windowX, sink->windowY,
+					sink->windowWidth, sink->windowHeight );
+
+		}
+		else
+		{
+			printf("Geometry : x=%d, y=%d, width=%d, height=%d\n",sink->windowX,sink->windowY,
+					sink->defaultWidth,sink->defaultHeight);
+			wl_simple_shell_set_geometry( display->wos_shell, display->wos_surfaceId,
+					sink->windowX, sink->windowY,
+					sink->defaultWidth, sink->defaultHeight );
+		}
+#if 0
+		zorder = wl_fixed_from_double(sink->zorder);
+		wl_simple_shell_set_zorder( display->wos_shell, display->wos_surfaceId, zorder);
+#endif
+		opacity = wl_fixed_from_double(sink->opacity);
+		wl_simple_shell_set_opacity( display->wos_shell, display->wos_surfaceId, opacity);
+
+		wl_simple_shell_get_status( display->wos_shell, display->wos_surfaceId);
+		wl_display_flush(display->wos_display);
+	}
+
+}
+
+static void 
+wos_shellSurfaceCreated(void *data,
+                        struct wl_simple_shell *wl_simple_shell,
+                        uint32_t surfaceId,
+                        const char *surface_name)
+{
+   GstwesterosVideoSink *sink =(GstwesterosVideoSink*) data;
+   printf("shell surface created ::: name = %s,surfaceID = %x\n", surface_name,surfaceId);
+}
+                                
+static void 
+wos_shellSurfaceDestroyed(void *data,
+                         struct wl_simple_shell *wl_simple_shell,
+                         uint32_t surfaceId,
+                         const char *surface_name)
+{
+   printf("shell surface destroyed ::: name = %s,surfaceID = %x\n", surface_name,surfaceId);
+}
+                                  
+static void 
+wos_shellSurfaceStatus(void *data,
+                       struct wl_simple_shell *wl_simple_shell,
+                       uint32_t surfaceId,
+                       const char *name,
+                       uint32_t visible,
+                       int32_t x,
+                       int32_t y,
+                       int32_t w,
+                       int32_t h,
+                       wl_fixed_t opacity,
+                       wl_fixed_t zorder)
+{
+   printf("shell surface: %x name: %s\n", surfaceId, name);
+   printf("shell position (%d,%d,%d,%d) visible %d opacity %f zorder %f\n",
+           x, y, w, h, visible, wl_fixed_to_double(opacity), wl_fixed_to_double(zorder) );
+
+   GstwesterosVideoSink *sink =(GstwesterosVideoSink*) data;
+   wDisplay *display=sink->wos_display;
+
+   sink->windowX= x;
+   sink->windowY= y;
+   sink->windowWidth= w;
+   sink->windowHeight= h;
+   sink->zorder= wl_fixed_to_double (zorder);
+   sink->opacity = wl_fixed_to_double(opacity);
+   sink->visible = visible;
+
+}
+
+
+static void 
+wos_shellGetSurfacesDone(void *data, 
+                         struct wl_simple_shell *wl_simple_shell )
+{
+}
+
+static const struct wl_simple_shell_listener wos_shell_listener =
+{
+   wos_shellSurfaceId,
+   wos_shellSurfaceCreated,
+   wos_shellSurfaceDestroyed,
+   wos_shellSurfaceStatus,
+   wos_shellGetSurfacesDone
+};
+
+
+
+static void 
+wos_registry_handler (void *buff, 
+                     struct wl_registry *registry,
+                     uint32_t id, 
+                     const char *interface, 
+                     uint32_t version)
+{
+	GstwesterosVideoSink *sink =(GstwesterosVideoSink*) buff;
+        wDisplay *display=sink->wos_display;
+	if (strcmp (interface, "wl_compositor") == 0) 
+	{
+		display->wos_compositor = wl_registry_bind (registry, id, &wl_compositor_interface, 1);
+	} 
+	else if (strcmp (interface, "wl_simple_shell") == 0) 
+	{
+		display->wos_shell = wl_registry_bind (registry, id, &wl_simple_shell_interface, 1);
+		wl_simple_shell_add_listener (display->wos_shell, &wos_shell_listener, sink);
+
+	} 
+	else if (strcmp (interface, "wl_shm") == 0) 
+	{
+		display->wos_shm = wl_registry_bind (registry, id, &wl_shm_interface, 1);
+		wl_shm_add_listener (display->wos_shm, &wos_shm_listenter, sink);
+	}
 }
 
 
 
-static const struct wl_registry_listener wos_registry_listener = { registry_handle_global };
+static const struct wl_registry_listener wos_registry_listener = { wos_registry_handler };
 
-static wDisplay* create_wos_display(GstwesterosVideoSink *sink)
+static wDisplay* 
+create_wos_display(GstwesterosVideoSink *sink)
 {
+	wDisplay* display = (wDisplay*)malloc (sizeof (wDisplay));
+	display->wos_display = wl_display_connect (NULL);
 
-  wDisplay* display = NULL;
-//Display Params
-  display = malloc (sizeof (wDisplay));
-  display->wos_display = wl_display_connect (NULL);
+	if (display->wos_display == NULL) {
+		free (display->wos_display);
+		return NULL;
+	}
+        sink->wos_display = display;
 
-  if (display->wos_display == NULL) {
-    free (display->wos_display);
-    return NULL;
-  }
+	display->wos_registry = wl_display_get_registry (display->wos_display);
+	wl_registry_add_listener (display->wos_registry, &wos_registry_listener, sink);
 
-  display->wos_registry = wl_display_get_registry (display->wos_display);
-  wl_registry_add_listener (display->wos_registry, &wos_registry_listener, display);
+	wl_display_roundtrip (display->wos_display);
+	if (display->wos_shm == NULL) {
+		GST_ERROR ("No wl_shm global..");
+		return NULL;
+	}
 
-  wl_display_roundtrip (display->wos_display);
-  if (display->wos_shm == NULL) {
-    GST_ERROR ("No wl_shm global..");
-    return NULL;
-  }
+	wl_display_roundtrip (display->wos_display);
+	wl_display_get_fd (display->wos_display);
 
-  wl_display_roundtrip (display->wos_display);
+	g_mutex_lock (&sink->wos_lock);
+        display->wos_surface = wl_compositor_create_surface (display->wos_compositor);
+	g_mutex_unlock (&sink->wos_lock);
 
-  wl_display_get_fd (display->wos_display);
-
- 
-  return display;
+	return display;
 }
 
-static gboolean gst_westeros_video_sink_start(GstBaseSink *base_sink)
+static gboolean 
+gst_westeros_video_sink_start(GstBaseSink *base_sink)
 {
   GstwesterosVideoSink *sink = (GstwesterosVideoSink *) base_sink;
+  wDisplay *display = sink->wos_display;
   gboolean result = TRUE;
 
   GST_DEBUG_OBJECT (sink, "start");
 
+  if (!display)
+    display = create_wos_display (sink);
 
-  if (!sink->window)
-    sink->window = create_wos_display (sink);
-
-  if (sink->window == NULL) {
+  if (display == NULL) {
     GST_ELEMENT_ERROR (base_sink, RESOURCE, OPEN_READ_WRITE,
         ("Could not initialise Westeros output"),
         ("Could not create Westeros display"));
     return FALSE;
   }
-
   return result;
 }
 
-static gboolean gst_westeros_video_sink_stop(GstBaseSink *base_sink)
+static gboolean 
+gst_westeros_video_sink_stop(GstBaseSink *base_sink)
 {
   GstwesterosVideoSink *sink = (GstwesterosVideoSink*) base_sink;
+  wDisplay *display = sink->wos_display;
   gboolean result = TRUE;
 
   GST_DEBUG_OBJECT (sink, "stop");
-   
-   //TODO
+
+  if (display->wos_shm)
+      wl_shm_destroy (display->wos_shm);
+
+  if (display->wos_shell)
+    wl_shell_destroy (display->wos_shell);
+
+  if (display->wos_compositor)
+    wl_compositor_destroy (display->wos_compositor);
+
+  wl_display_flush (display->wos_display);
+  wl_display_disconnect (display->wos_display);
 
    return TRUE;
 }
 
-
-
-
-static void ping_handler (void *data, struct wl_shell_surface *wos_shell_surface, uint32_t serial)
-{
-  wl_shell_surface_pong (wos_shell_surface, serial);
-}
-
-
-static const struct wl_shell_surface_listener wos_shell_surface_listener = {
-  ping_handler,
-};
-
-static void create_wos_window (GstwesterosVideoSink * sink, int width, int height)
-{
-  g_mutex_lock (&sink->wos_lock);
-
-  wDisplay *display = sink->window;
-  display->width = width;
-  display->height = height;
-  display->redraw_check = FALSE;
-
-
-  display->wos_surface = wl_compositor_create_surface (display->wos_compositor);
-  display->wos_shell_surface = wl_shell_get_shell_surface (display->wos_shell,display->wos_surface);
-  g_return_if_fail (display->wos_shell_surface);
-  wl_shell_surface_add_listener (display->wos_shell_surface,&wos_shell_surface_listener, display);
-  wl_shell_surface_set_toplevel (display->wos_shell_surface);
-
-
-  g_mutex_unlock (&sink->wos_lock);
-}
-
-
 static void
-frame_redraw_callback_handler (void *data, struct wl_callback *wos_callback, uint32_t time)
+wos_frame_redraw_handler (void *data, struct wl_callback *wos_callback, uint32_t time)
 {
-  wDisplay *window = (wDisplay *) data;
-  window->redraw_check = FALSE;
+  
+  GstwesterosVideoSink *sink= (GstwesterosVideoSink*)data;
+  wDisplay *display = sink->wos_display;
+
+  display->redraw_check = FALSE;
   wl_callback_destroy (wos_callback);
 }
 
 static const struct wl_callback_listener wos_frame_callback_listener = {
-  frame_redraw_callback_handler
+  wos_frame_redraw_handler
 };
 
 
-static GstFlowReturn gst_westeros_video_sink_render(GstBaseSink *base_sink, GstBuffer *gst_buffer)
+static GstFlowReturn 
+gst_westeros_video_sink_render(GstBaseSink *base_sink, GstBuffer *gst_buffer)
 {
   GstwesterosVideoSink *sink= GST_WESTEROSVIDEOSINK(base_sink);
-  wDisplay *window = sink->window;
+  wDisplay *display = sink->wos_display;
+
   GstVideoRectangle source, dest, final;
   GstBuffer *to_render;
   GstWosMetaData *wos_metadata;
   GstFlowReturn ret;
   GType type;
 
-  static bool flag = true;
-  if ((sink->window && flag == true))
- {
-  	create_wos_window(sink,sink->VWidth, sink->VHeight);
-	flag = false;
-  }
+
   type = gst_wos_metadata_get_type ();
   wos_metadata = (GstWosMetaData*)gst_buffer_get_meta(gst_buffer,type);
 
-  if (window->redraw_check) {
-    wl_display_dispatch (window->wos_display);
-  }
+  if (display->redraw_check) 
+    wl_display_dispatch (display->wos_display);
 
   if (wos_metadata && wos_metadata->sink == sink) 
   {
@@ -795,17 +978,18 @@ static GstFlowReturn gst_westeros_video_sink_render(GstBaseSink *base_sink, GstB
   } 
   else 
   {
-    if (!sink->pool)
+    if (!sink->wos_gstPool)
       goto pool_unavailable;
 
     GstMapInfo src;
     GST_LOG_OBJECT (sink, "buffer %p not from our pool, copying", gst_buffer);
 
 
-    if (!gst_buffer_pool_set_active (sink->pool, TRUE))
+
+    if (!gst_buffer_pool_set_active (sink->wos_gstPool, TRUE))
       goto buffer_activate_failed;
 
-    if((ret = gst_buffer_pool_acquire_buffer (sink->pool, &to_render, NULL)) != GST_FLOW_OK);
+    if((ret = gst_buffer_pool_acquire_buffer (sink->wos_gstPool, &to_render, NULL)) != GST_FLOW_OK);
         goto buffer_unavailable;
 
     gst_buffer_map (gst_buffer, &src, GST_MAP_READ);
@@ -815,21 +999,20 @@ static GstFlowReturn gst_westeros_video_sink_render(GstBaseSink *base_sink, GstB
     wos_metadata = gst_buffer_get_wos_metadata(to_render);//note
   }
 
-  dest.w = sink->window->width;
-  dest.h = sink->window->height;
-  source.w = sink->VWidth;
-  source.h = sink->VHeight;
+  dest.w = display->width;
+  dest.h = display->height;
+  source.w = sink->defaultWidth;
+  source.h = sink->defaultHeight;
+    
+  wl_surface_attach (display->wos_surface, wos_metadata->wos_buffer, 0, 0);
+  gst_video_sink_center_rect (source, dest, &final, TRUE);
+  wl_surface_damage (display->wos_surface, 0, 0, final.w, final.h);
 
-//note
-  wl_surface_attach (sink->window->wos_surface, wos_metadata->wos_buffer, 0, 0);
-
-  gst_video_sink_center_rect (source, dest, &final, FALSE);
-  wl_surface_damage (sink->window->wos_surface, 0, 0, final.w, final.h);
-  window->redraw_check = TRUE;
-  window->wos_callback = wl_surface_frame (window->wos_surface);
-  wl_callback_add_listener (window->wos_callback, &wos_frame_callback_listener, window);
-  wl_surface_commit (window->wos_surface);
-  wl_display_dispatch (window->wos_display);
+  display->redraw_check = TRUE;
+  display->wos_callback = wl_surface_frame (display->wos_surface);
+  wl_callback_add_listener (display->wos_callback, &wos_frame_callback_listener, sink);
+  wl_surface_commit (display->wos_surface);
+  wl_display_dispatch (display->wos_display);
 
   if (gst_buffer != to_render)
     gst_buffer_unref (to_render);
@@ -853,7 +1036,8 @@ buffer_activate_failed:
 
 }
 
-static GstFlowReturn gst_westeros_video_sink_preroll(GstBaseSink *base_sink, GstBuffer *buffer)
+static GstFlowReturn 
+gst_westeros_video_sink_preroll(GstBaseSink *base_sink, GstBuffer *buffer)
 {
    GstwesterosVideoSink *sink= GST_WESTEROSVIDEOSINK(base_sink);
    GST_DEBUG_OBJECT(sink, "gst_westeros_video_sink_preroll : %p", buffer);
@@ -862,7 +1046,8 @@ static GstFlowReturn gst_westeros_video_sink_preroll(GstBaseSink *base_sink, Gst
 }
 
 
-static gboolean gst_westeros_video_sink_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
+static gboolean 
+gst_westeros_video_sink_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
 {
   GstwesterosVideoSink *filter;
   gboolean ret;
@@ -893,7 +1078,8 @@ static gboolean gst_westeros_video_sink_sink_event (GstPad * pad, GstObject * pa
 
 
 
-static gboolean gst_westeros_video_sink_query(GstElement *element, GstQuery *query)
+static gboolean 
+gst_westeros_video_sink_query(GstElement *element, GstQuery *query)
 {
 
    switch (GST_QUERY_TYPE(query))
@@ -934,23 +1120,25 @@ static gboolean gst_westeros_video_sink_query(GstElement *element, GstQuery *que
 }
 
 
-static GstFlowReturn gst_westeros_video_sink_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
+static GstFlowReturn 
+gst_westeros_video_sink_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
 {
   GstwesterosVideoSink *sink = GST_WESTEROSVIDEOSINK (parent);
 
 }
-static gboolean westerosvideosink_init (GstPlugin * westerosvideosink)
+static gboolean 
+westerosvideosink_init (GstPlugin * westerosvideosink)
 {
-  GST_DEBUG_CATEGORY_INIT (gst_westeros_video_sink_debug, "westerosvideosink", 0, "Westerosvideosink");
-  return gst_element_register (westerosvideosink, "westerosvideosink", GST_RANK_MARGINAL, GST_TYPE_WESTEROSVIDEOSINK);
+  GST_DEBUG_CATEGORY_INIT (gst_westeros_video_sink_debug, "westerossink", 0, "Westeros video sink");
+  return gst_element_register (westerosvideosink, "westerossink", GST_RANK_MARGINAL, GST_TYPE_WESTEROSVIDEOSINK);
 }
 
 
 GST_PLUGIN_DEFINE (
     GST_VERSION_MAJOR,
     GST_VERSION_MINOR,
-    westerosvideosink,
-    "westerosvideosink",
+    westerossink,
+    "westeros video sink element",
     westerosvideosink_init,
     VERSION,
     "LGPL",

@@ -27,6 +27,7 @@
 #include <gst/video/gstvideometa.h>
 
 #include <wayland-client.h>
+#include <simpleshell-client-protocol.h>
 
 
 
@@ -50,12 +51,12 @@ G_BEGIN_DECLS
 
 
 
-struct westeros_window_display
+struct wosDisplay_t
 {
   struct wl_display *wos_display;
   struct wl_registry *wos_registry;
   struct wl_compositor *wos_compositor;
-  struct wl_shell *wos_shell;
+  struct wl_simple_shell *wos_shell;
   struct wl_shm *wos_shm;
   uint32_t wos_formats;
 
@@ -70,29 +71,38 @@ struct westeros_window_display
 };
 
 
-struct wos_shared_pool {
+struct wosSharedPool_t {
   struct wl_shm_pool *pool;
   size_t size;
   size_t count;
   void *buff;
 };
 
-typedef struct westeros_window_display wDisplay;
+typedef struct wosDisplay_t wDisplay;
+typedef struct wosSharedPool_t wSharedPool;
 
 struct _GstwesterosVideoSink
 {
   GstVideoSink parent;
-  wDisplay *window;
-  struct wos_shared_pool *shared_pool;
-  GstBufferPool *pool;
+
+  wDisplay *wos_display;
+  wSharedPool *wos_sharedPool;
+  GstBufferPool *wos_gstPool;
   GMutex wos_lock;
-  gint VWidth;
-  gint VHeight;
-   int windowX;
-   int windowY;
-   int windowWidth;
-   int windowHeight;
+
+  gint defaultWidth;
+  gint defaultHeight;
+
+  int windowX;
+  int windowY;
+  int windowWidth;
+  int windowHeight;
+  float zorder; 
+  float opacity;
+  bool visible;
+
   uint32_t format;
+  bool geometrySet;
 };
 
 struct _GstwesterosVideoSinkClass 

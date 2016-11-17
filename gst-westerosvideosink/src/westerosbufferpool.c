@@ -13,10 +13,12 @@
 
 #define SIZE 1024
 #define SHM_FILE_PATH "/tmp/westeros-shm"
+
 #define GST_WOS_METADATA_GET_TYPE  (gst_wos_metadata_get_type())
 #define GST_WOS_METADATA_INFO  (gst_wos_metadata_get_info())
 
-GType gst_wos_metadata_get_type ()
+GType 
+gst_wos_metadata_get_type ()
 {
   static const gchar *api_tags[] =
       { "memory", 
@@ -34,14 +36,20 @@ GType gst_wos_metadata_get_type ()
   return g_type;
 }
 
-static void gst_wos_metadata_free (GstWosMetaData * wos_metadata, GstBuffer *gst_buffer)
+
+
+static void 
+gst_wos_metadata_free (GstWosMetaData * wos_metadata, GstBuffer *gst_buffer)
 {
   gst_object_unref (wos_metadata->sink);
   munmap (wos_metadata->data, wos_metadata->buffer_size);
   wl_buffer_destroy (wos_metadata->wos_buffer);
 }
 
-const GstMetaInfo *gst_wos_metadata_get_info ()
+
+
+const GstMetaInfo *
+gst_wos_metadata_get_info ()
 {
   static const GstMetaInfo *wos_metadata_info = NULL;
   if (g_once_init_enter (&wos_metadata_info)) 
@@ -56,7 +64,10 @@ const GstMetaInfo *gst_wos_metadata_get_info ()
   return wos_metadata_info;
 }
 
-GstWosMetaData* gst_buffer_get_wos_metadata(GstBuffer *gst_buffer)
+
+
+GstWosMetaData* 
+gst_buffer_get_wos_metadata(GstBuffer *gst_buffer)
 {
   GstWosMetaData *metaData;
   GType type = gst_wos_metadata_get_type ();
@@ -71,11 +82,15 @@ static void gst_westeros_buffer_pool_finalize (GObject * object);
 #define gst_westeros_buffer_pool_parent_class parent_class
 G_DEFINE_TYPE (GstWesterosBufferPool, gst_westeros_buffer_pool, GST_TYPE_BUFFER_POOL);
 
-static gboolean westeros_buffer_pool_set_config (GstBufferPool * gst_bufferpool, GstStructure * gst_config)
+static gboolean 
+westeros_buffer_pool_set_config (GstBufferPool * gst_bufferpool, 
+                                 GstStructure * gst_config)
 {
   GstVideoInfo gst_videoInfo ;
   GstCaps *gst_caps;
   GstWesterosBufferPool *wos_bufferpool = GST_WESTEROS_BUFFER_POOL_CAST (gst_bufferpool);
+
+  GstwesterosVideoSink *sink  = wos_bufferpool->sink;
 
   if (!gst_buffer_pool_config_get_params (gst_config, &gst_caps, NULL, NULL, NULL))
     goto config_failed;
@@ -91,10 +106,12 @@ static gboolean westeros_buffer_pool_set_config (GstBufferPool * gst_bufferpool,
 
   wos_bufferpool->gst_caps = gst_caps_ref (gst_caps);
   wos_bufferpool->gst_VideoInfo = gst_videoInfo;
+
   wos_bufferpool->VWidth = gst_videoInfo.width;
   wos_bufferpool->VHeight = gst_videoInfo.height;
 
   return GST_BUFFER_POOL_CLASS (parent_class)->set_config (gst_bufferpool, gst_config);
+
   /* ERRORS */
 config_failed:
   {
@@ -114,7 +131,10 @@ invalid_caps:
   }
 }
 
-static struct wl_shm_pool *make_wos_shm_pool (wDisplay *display, int size, void **data)
+static struct wl_shm_pool*
+make_wos_shm_pool (wDisplay *display, 
+		   int size,
+                   void **data)
 {
   struct wl_shm_pool *wos_pool;
   char shm_filename[SIZE];
@@ -136,7 +156,7 @@ static struct wl_shm_pool *make_wos_shm_pool (wDisplay *display, int size, void 
     return NULL;
   }
 
-  *data = mmap (NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  *data = mmap (NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0); //map device to memory
   if (*data == MAP_FAILED) 
    {
     GST_ERROR ("mmap failed: ");
@@ -149,72 +169,87 @@ static struct wl_shm_pool *make_wos_shm_pool (wDisplay *display, int size, void 
   return wos_pool;
 }
 
-static struct shm_pool *wos_shm_pool_create (wDisplay *display, size_t buffer_size)
-{
-  struct wos_shared_pool *wos_pool = NULL;
-  wos_pool = (struct wos_shared_pool*) malloc (sizeof *wos_pool);
 
-  if (wos_pool == NULL)
+
+static struct shm_pool*
+wosCreateSharedPool (wDisplay *display, 
+		     size_t buffer_size)
+{
+  wSharedPool *sharedPool = NULL;
+  sharedPool = (wSharedPool*) malloc (sizeof *sharedPool);
+
+  if (sharedPool == NULL)
     return NULL;
 
-  wos_pool->pool = make_wos_shm_pool (display, buffer_size, &wos_pool->buff);
-  if (wos_pool->pool == NULL) 
+  sharedPool->pool = make_wos_shm_pool (display, buffer_size, &sharedPool->buff);
+  if (sharedPool->pool == NULL) 
   {
-    free (wos_pool);
+    free (sharedPool);
     return NULL;
   }
-  wos_pool->size = buffer_size;
-  wos_pool->count = 0;
+  sharedPool->size = buffer_size;
+  sharedPool->count = 0;
 
-  return wos_pool;
+  return sharedPool;
 }
 
-static void *wos_shm_pool_allocate (struct wos_shared_pool *wos_shm_pool, size_t buffer_size, int *offset)
+static void *
+wosAllocateSharedPool (wSharedPool *sharedPool, 
+		       size_t size, 
+                       int *offset)
 {
-  if (wos_shm_pool->count + buffer_size > wos_shm_pool->size)
+  void *data ;
+  if ( (sharedPool->count + size) > sharedPool->size)
     return NULL;
 
-  *offset = wos_shm_pool->count;
-  wos_shm_pool->count += buffer_size;
+  *offset = sharedPool->count;
+  sharedPool->count += size;
 
-  return (char *) wos_shm_pool->buff + *offset;
+  data = (char *) sharedPool->buff + *offset;
+  return data;
 }
 
-static void shm_pool_reset (struct wos_shared_pool *wos_shm_pool)
+static void 
+shm_pool_reset (wSharedPool *sharedPool)
 {
-  wos_shm_pool->count = 0;
+  sharedPool->count = 0;
 }
 
 static GstWosMetaData *
-gst_buffer_add_westeros_metadata (GstBuffer * gst_buffer, GstWesterosBufferPool * wos_buffer_pool)
+gst_buffer_add_westeros_metadata (GstBuffer * gst_buffer, 
+                                 GstWesterosBufferPool * wos_buffer_pool)
 {
+  GstwesterosVideoSink *sink  = wos_buffer_pool->sink;
+  wDisplay *display = sink->wos_display;
+  wSharedPool *sharedPool = sink->wos_sharedPool;
+
   GstWosMetaData *wos_metadata = NULL;
   void *data;
   gint offset;
-  GstwesterosVideoSink *sink  = wos_buffer_pool->sink;
-  guint stride = wos_buffer_pool->VWidth * 4;
-  guint size = wos_buffer_pool->VHeight * stride;
+  guint stride,size;
+
+  stride = wos_buffer_pool->VWidth * 4;
+  size = wos_buffer_pool->VHeight * stride;
 
 
   wos_metadata = (GstWosMetaData *) gst_buffer_add_meta (gst_buffer, GST_WOS_METADATA_INFO, NULL);
   wos_metadata->sink = gst_object_ref (sink);
 
-  if (!sink->shared_pool ) 
+  if (!sharedPool ) 
   {
-    sink->shared_pool = wos_shm_pool_create (sink->window, size * 15);
-    shm_pool_reset (sink->shared_pool);
+    sharedPool = wosCreateSharedPool (display, size * 15); 
+    shm_pool_reset (sharedPool);
   }
 
-  if (!sink->shared_pool) 
+  if (!sharedPool) 
     return NULL;
 
-  data = wos_shm_pool_allocate (sink->shared_pool, size, &offset);
+  data = wosAllocateSharedPool (sharedPool, size, &offset);
   if (!data )
     return NULL;
 
-  wos_metadata->wos_buffer = wl_shm_pool_create_buffer (sink->shared_pool->pool, 
-                                      offset,sink->VWidth, sink->VHeight, stride, sink->format);
-
+  wos_metadata->wos_buffer = wl_shm_pool_create_buffer (sharedPool->pool, 
+                                      offset,sink->defaultWidth, sink->defaultHeight, stride, sink->format);
   wos_metadata->data = data;
   wos_metadata->buffer_size = size;
 
@@ -225,21 +260,23 @@ gst_buffer_add_westeros_metadata (GstBuffer * gst_buffer, GstWesterosBufferPool 
   return wos_metadata;
 }
 
-static GstFlowReturn westeros_buffer_pool_alloc (GstBufferPool * gst_pool, 
-         GstBuffer ** gst_buffer, GstBufferPoolAcquireParams * gst_bufferpoolParams)
+static GstFlowReturn 
+westeros_buffer_pool_alloc (GstBufferPool * gst_pool, 
+                            GstBuffer ** gst_buffer, 
+                           GstBufferPoolAcquireParams * gst_bufferpoolParams)
 {
   GstWesterosBufferPool *wos_pool = GST_WESTEROS_BUFFER_POOL_CAST (gst_pool);
   GstWosMetaData *wos_metadata ;
 
-  GstBuffer *wos_buffer = gst_buffer_new ();
-  wos_metadata = gst_buffer_add_westeros_metadata (wos_buffer, wos_pool);
+  GstBuffer *wos_gstBuffer = gst_buffer_new ();
+  wos_metadata = gst_buffer_add_westeros_metadata (wos_gstBuffer, wos_pool);
 
   if (wos_metadata == NULL) 
    {
-    gst_buffer_unref (wos_buffer);
+    gst_buffer_unref (wos_gstBuffer);
     goto buffer_unavailable;
   }
-  *gst_buffer = wos_buffer;
+  *gst_buffer = wos_gstBuffer;
 
   return GST_FLOW_OK;
 
@@ -249,7 +286,8 @@ buffer_unavailable:
     return GST_FLOW_ERROR;
   }
 }
-static void gst_westeros_buffer_pool_finalize (GObject * object)
+static void 
+gst_westeros_buffer_pool_finalize (GObject * object)
 {
   GstWesterosBufferPool *wos_pool = GST_WESTEROS_BUFFER_POOL_CAST (object);
 
@@ -259,7 +297,8 @@ static void gst_westeros_buffer_pool_finalize (GObject * object)
 
 
 
-GstBufferPool *gst_westeros_buffer_pool_new (GstwesterosVideoSink * sink)
+GstBufferPool *
+gst_westeros_buffer_pool_new (GstwesterosVideoSink * sink)
 {
   GstWesterosBufferPool *wos_pool = NULL;
 
@@ -269,7 +308,8 @@ GstBufferPool *gst_westeros_buffer_pool_new (GstwesterosVideoSink * sink)
   return GST_BUFFER_POOL_CAST (wos_pool);
 }
 
-static void gst_westeros_buffer_pool_class_init (GstWesterosBufferPoolClass * klass)
+static void 
+gst_westeros_buffer_pool_class_init (GstWesterosBufferPoolClass * klass)
 {
   GObjectClass *gobject_class = (GObjectClass *) klass;
   GstBufferPoolClass *gstbufferpool_class = (GstBufferPoolClass *) klass;
@@ -278,7 +318,8 @@ static void gst_westeros_buffer_pool_class_init (GstWesterosBufferPoolClass * kl
   gobject_class->finalize = gst_westeros_buffer_pool_finalize;
 }
 
-static void gst_westeros_buffer_pool_init (GstWesterosBufferPool * pool)
+static void 
+gst_westeros_buffer_pool_init (GstWesterosBufferPool * pool)
 {
 }
 
