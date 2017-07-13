@@ -58,11 +58,9 @@ enum
   PROP_0,
   PROP_SILENT,
   PROP_WESTEROS_DISPLAY,
-  PROP_WINDOW_SET
-#if 0
+  PROP_WINDOW_SET,
   PROP_ZORDER,
   PROP_OPACITY
-#endif
 };
 
 
@@ -162,7 +160,6 @@ gst_westeros_video_sink_class_init (GstwesterosVideoSinkClass * klass)
        g_param_spec_string ("rectangle", "rectangle",
            "Window Set Format: x,y,width,height",
            NULL, G_PARAM_WRITABLE));
-#if 0 
   g_object_class_install_property (G_OBJECT_CLASS (klass), PROP_ZORDER,
        g_param_spec_float ("zorder", "zorder",
            "zorder from 0.0 (lowest) to 1.0 (highest)",
@@ -172,7 +169,6 @@ gst_westeros_video_sink_class_init (GstwesterosVideoSinkClass * klass)
        g_param_spec_float ("opacity", "opacity",
            "opacity from 0.0 (transparent) to 1.0 (opaque)",
            0.0, 1.0, 1.0, G_PARAM_WRITABLE));
-#endif
 
   g_object_class_install_property (gobject_class, PROP_WESTEROS_DISPLAY,
       g_param_spec_pointer ("westeros-display", "Wayland Display",
@@ -222,7 +218,7 @@ gst_westeros_video_sink_init (GstwesterosVideoSink * sink)
    sink->windowWidth= DEFAULT_WINDOW_WIDTH;
    sink->windowHeight= DEFAULT_WINDOW_HEIGHT;
 
-   sink->zorder= 0.0;
+   sink->zorder= 1.0;
    sink->opacity= 1.0;
    sink->visible= false;
 
@@ -293,32 +289,52 @@ gst_westeros_video_sink_set_property (GObject * object,
          g_strfreev(parts);
          break;
       }
-#if 0  
       case PROP_ZORDER:
       {
+        if (!display)
+                    display = create_wos_display (sink);
+
+                if (display == NULL)
+                {
+                        GST_ELEMENT_ERROR (sink, RESOURCE, OPEN_READ_WRITE,
+                        ("Could not initialise Westeros output"),
+                        ("Could not create Westeros display"));
+                            return ;
+                }
+
          sink->zorder= g_value_get_float(value);
-         if ( sink->window->wos_shell )
+         if ( display->wos_shell )
          {
             wl_fixed_t zorder= wl_fixed_from_double(sink->zorder);
-            printf("\n###############gst_westeros_sink_set_property set zorder %f##############\n", sink->zorder );
-            wl_simple_shell_set_zorder( sink->window->wos_shell, sink->window->wos_surfaceId, zorder);
+            printf("\n###############gst_westeros_sink_set_property set zorder %f##############\n", zorder );
+            wl_simple_shell_set_zorder( display->wos_shell, display->wos_surfaceId, zorder);
          }
          break;
       }
 
       case PROP_OPACITY:
       {
+         if (!display)
+                    display = create_wos_display (sink);
+
+                if (display == NULL)
+                {
+                        GST_ELEMENT_ERROR (sink, RESOURCE, OPEN_READ_WRITE,
+                        ("Could not initialise Westeros output"),
+                        ("Could not create Westeros display"));
+                            return ;
+                }
+
          sink->opacity= g_value_get_float(value);
-         if ( sink->window->wos_shell )
+         if ( display->wos_shell )
          {
             wl_fixed_t opacity= wl_fixed_from_double(sink->opacity);
             printf("\n###############gst_westeros_sink_set_property set opacity %f##############\n", sink->opacity );
-            wl_simple_shell_set_opacity ( sink->window->wos_shell, sink->window->wos_surfaceId, opacity );
+            wl_simple_shell_set_opacity ( display->wos_shell, display->wos_surfaceId, opacity );
          }
          break;
       }
 
-#endif
 
     default:
     {
@@ -748,7 +764,7 @@ wos_shellSurfaceId(void *data,
 	{
 		if(sink->geometrySet)
 		{
-			printf("Geometry : x=%d, y=%d, width=%d, height=%d###############\n",sink->windowX,sink->windowY,
+			printf("wst-sink-dbg Geometry : x=%d, y=%d, width=%d, height=%d###############\n",sink->windowX,sink->windowY,
 					sink->windowWidth,sink->windowHeight);
 			wl_simple_shell_set_geometry( display->wos_shell, display->wos_surfaceId,
 					sink->windowX, sink->windowY,
@@ -757,16 +773,15 @@ wos_shellSurfaceId(void *data,
 		}
 		else
 		{
-			printf("Geometry : x=%d, y=%d, width=%d, height=%d\n",sink->windowX,sink->windowY,
+			printf("wst-Sink-dbg Geometry : x=%d, y=%d, width=%d, height=%d\n",sink->windowX,sink->windowY,
 					sink->defaultWidth,sink->defaultHeight);
 			wl_simple_shell_set_geometry( display->wos_shell, display->wos_surfaceId,
 					sink->windowX, sink->windowY,
 					sink->defaultWidth, sink->defaultHeight );
 		}
-#if 0
+
 		zorder = wl_fixed_from_double(sink->zorder);
 		wl_simple_shell_set_zorder( display->wos_shell, display->wos_surfaceId, zorder);
-#endif
 		opacity = wl_fixed_from_double(sink->opacity);
 		wl_simple_shell_set_opacity( display->wos_shell, display->wos_surfaceId, opacity);
 
